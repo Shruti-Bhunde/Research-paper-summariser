@@ -19,10 +19,14 @@ from pdf_generator import generate_summary_pdf
 from pdf_processor import build_pdf_chunks, extract_pdf_text, process_pdf, retrieve_relevant_chunks
 from database import get_connection
 
-app = FastAPI(
-    title="Research Paper Summarizer AI API",
-    description="Backend API for uploading research papers, extracting summaries using Gemini, and exporting report PDFs.",
-)
+# from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles # for deployment
+
+app = FastAPI()
+# app = FastAPI(
+#     title="Research Paper Summarizer AI API",
+#     description="Backend API for uploading research papers, extracting summaries using Gemini, and exporting report PDFs.",
+# )
 
 app.add_middleware(
     CORSMiddleware,
@@ -633,3 +637,4 @@ User question:
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Chat generation failed: {exc}") from exc
+app.mount("/", StaticFiles(directory="static", html=True)) #for deployment

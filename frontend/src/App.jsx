@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import './App.css';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+// const API_BASE_URL = 'http://localhost:8000/api';
+const API_BASE_URL = '/api'; //for deployment
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 const AUTH_TOKEN_KEY = 'research_summariser_google_token';
 const SELECTED_PAPER_KEY = 'research_summariser_selected_paper';
