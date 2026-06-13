@@ -23,12 +23,11 @@ const CHAT_SUGGESTIONS = [
   'What follow-up question should I ask the author?',
 ];
 
-function SparklesIcon() {
+function BookIcon() {
   return (
     <svg className="upload-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-      <path d="m5 3 1 2.5L8.5 6 6 7 5 9.5 4 7 1.5 6 4 5.5z" />
-      <path d="m19 17 1 2.5 2.5.5-2.5 1-1 2.5-1-2.5-2.5-1 2.5-1z" />
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
     </svg>
   );
 }
@@ -250,6 +249,22 @@ export default function App() {
     setViewerMode('summary');
     setPaperMode('summary');
     setSummaryTab('overall_summary');
+  };
+
+  const deletePaper = async (summaryId, e) => {
+    e.stopPropagation();
+    const token = authTokenRef.current;
+    try {
+      await axios.delete(`${API_BASE_URL}/papers/${summaryId}`, {
+        headers: authHeaders(token),
+      });
+      setPapers((prev) => prev.filter((p) => p.summary_id !== summaryId));
+      if (selectedPaperId === summaryId) {
+        clearState();
+      }
+    } catch (err) {
+      console.error('Failed to delete paper:', err);
+    }
   };
 
   useEffect(() => {
@@ -585,19 +600,33 @@ export default function App() {
           ) : (
             <div className="paper-list">
               {papers.map((paper) => (
-                <button
-                  key={paper.summary_id}
-                  className={`paper-list-item ${selectedPaperId === paper.summary_id ? 'active' : ''}`}
-                  onClick={() => selectPaper(paper.summary_id)}
-                  disabled={papersLoading}
-                >
-                  <div className="paper-list-title">{paper.title}</div>
-                  <div className="paper-list-meta">
-                    <span>{paper.page_count} pages</span>
-                    <span>{paper.chat_turns} messages</span>
-                  </div>
-                  <div className="paper-list-date">{formatDateTime(paper.updated_at || paper.created_at)}</div>
-                </button>
+                <div key={paper.summary_id} className="paper-list-item-wrapper">
+                  <button
+                    className={`paper-list-item ${selectedPaperId === paper.summary_id ? 'active' : ''}`}
+                    onClick={() => selectPaper(paper.summary_id)}
+                    disabled={papersLoading}
+                  >
+                    <div className="paper-list-title">{paper.title}</div>
+                    <div className="paper-list-meta">
+                      <span>{paper.page_count} pages</span>
+                      {paper.chat_turns > 0 && <span>{paper.chat_turns} messages</span>}
+                    </div>
+                    <div className="paper-list-date">{formatDateTime(paper.updated_at || paper.created_at)}</div>
+                  </button>
+                  <button
+                    className="paper-delete-btn"
+                    title="Delete this paper"
+                    onClick={(e) => deletePaper(paper.summary_id, e)}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                      <path d="M10 11v6" />
+                      <path d="M14 11v6" />
+                      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                    </svg>
+                  </button>
+                </div>
               ))}
             </div>
           )}
@@ -639,7 +668,7 @@ export default function App() {
               />
               <div className="dropzone-content">
                 <div className="upload-icon-wrapper">
-                  <SparklesIcon />
+                  <BookIcon />
                 </div>
                 <div className="dropzone-prompt">
                   <h3>{file ? file.name : 'Drag & drop a research paper PDF'}</h3>
@@ -674,36 +703,50 @@ export default function App() {
           )}
         </section>
 
+        {selectedPaper && (
+          <div className="workspace-header glass-panel" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', padding: '1.5rem 2rem' }}>
+            <div className="paper-info">
+              <h2 style={{ fontSize: '1.5rem', fontWeight: 700 }}>{selectedPaper.title}</h2>
+              <div className="paper-metadata" style={{ display: 'flex', gap: '1rem', marginTop: '0.4rem' }}>
+                {selectedPaper.author && selectedPaper.author !== 'Unknown' && (
+                  <span className="meta-badge">Author: <strong>{selectedPaper.author}</strong></span>
+                )}
+                <span className="meta-badge">Pages: <strong>{selectedPaper.page_count}</strong></span>
+              </div>
+            </div>
+            <div className="workspace-mode-toggle" style={{ display: 'flex', gap: '0.5rem', background: 'rgba(255,255,255,0.03)', padding: '0.3rem', borderRadius: '12px', border: '1px solid var(--border-light)' }}>
+              <button
+                className={`btn ${paperMode === 'summary' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ padding: '0.5rem 1.2rem', borderRadius: '8px', fontSize: '0.9rem' }}
+                onClick={() => setPaperMode('summary')}
+              >
+                Report
+              </button>
+              <button
+                className={`btn ${paperMode === 'chat' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ padding: '0.5rem 1.2rem', borderRadius: '8px', fontSize: '0.9rem' }}
+                onClick={() => setPaperMode('chat')}
+              >
+                Chat
+              </button>
+            </div>
+          </div>
+        )}
+
         {selectedPaper && paperMode === 'summary' ? (
           <section className="paper-workspace">
             <div className="glass-panel summary-result-panel">
-              <div className="results-header-bar">
-                <div className="paper-info">
-                  <h2>{selectedPaper.summary?.title || selectedPaper.title}</h2>
-                  <div className="paper-metadata">
-                    {selectedPaper.author && selectedPaper.author !== 'Unknown' && (
-                      <span className="meta-badge">Author: <strong>{selectedPaper.author}</strong></span>
-                    )}
-                    {selectedPaper.page_count > 0 && (
-                      <span className="meta-badge">Pages: <strong>{selectedPaper.page_count}</strong></span>
-                    )}
-                  </div>
-                </div>
-                <div className="action-buttons">
-                  <button className="btn btn-secondary" onClick={() => setPaperMode('chat')}>
-                    Open Chat Workspace
-                  </button>
-                  <button className="btn btn-primary" onClick={downloadSummaryPdf}>
-                    Download Summary PDF
-                  </button>
-                </div>
+              <div className="results-header-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '1px solid var(--border-light)', paddingBottom: '1rem' }}>
+                <h3 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.4rem', fontWeight: 700 }}>Paper Summary Details</h3>
+                <button className="btn btn-primary" onClick={downloadSummaryPdf}>
+                  <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" style={{ marginRight: '0.4rem' }}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4-4 4m0 0-4-4m4 4V4" />
+                  </svg>
+                  Download Summary PDF
+                </button>
               </div>
 
               <div className="summary-viewport summary-result-viewport">
-                <div className="viewport-header">
-                  <h3>Paper Summary</h3>
-                </div>
-
                 <div className="summary-tab-bar">
                   {summarySections.map((section) => (
                     <button
@@ -716,7 +759,7 @@ export default function App() {
                   ))}
                 </div>
 
-                <div className="viewport-body">
+                <div className="viewport-body" style={{ marginTop: '1.5rem' }}>
                   {summaryTab === 'overall_summary' && <p>{selectedPaper.summary?.overall_summary || 'No content generated for this section.'}</p>}
                   {summaryTab === 'main_idea' && <p>{selectedPaper.summary?.main_idea || 'No content generated for this section.'}</p>}
                   {summaryTab === 'problem_solved' && <p>{selectedPaper.summary?.problem_solved || 'No content generated for this section.'}</p>}
@@ -777,51 +820,30 @@ export default function App() {
                   )}
                 </div>
               </div>
-
-              <div className="summary-chat-cta">
-                <button className="btn btn-primary" onClick={() => setPaperMode('chat')}>
-                  Continue with Chatbot
-                </button>
-                <button className="btn btn-secondary" onClick={openOriginalPdf}>
-                  Open Original PDF
-                </button>
-              </div>
             </div>
           </section>
         ) : selectedPaper ? (
           <section className="paper-workspace">
             <div className="paper-grid">
               <div className="paper-panel pdf-panel glass-panel">
-                <div className="paper-panel-header">
+                <div className="paper-panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
-                    <p className="paper-kicker">Paper viewer</p>
-                    <h2>{selectedPaper.title}</h2>
-                    <p className="paper-subtitle">
-                      {selectedPaper.author && selectedPaper.author !== 'Unknown' ? `Author: ${selectedPaper.author} • ` : ''}
-                      {selectedPaper.page_count} pages
-                    </p>
+                    <p className="paper-kicker">PDF Viewer</p>
                   </div>
-                    <div className="paper-panel-actions">
-                      <button
-                        className="btn btn-secondary tab-button"
-                        onClick={() => setPaperMode('summary')}
-                      >
-                        Summary View
-                      </button>
-                      <button
-                        className={`btn btn-secondary tab-button ${viewerMode === 'summary' ? 'active' : ''}`}
-                        onClick={() => setViewerMode('summary')}
-                      >
+                  <div className="paper-panel-actions" style={{ display: 'flex', gap: '0.4rem' }}>
+                    <button
+                      className={`btn btn-secondary tab-button ${viewerMode === 'summary' ? 'active' : ''}`}
+                      style={{ padding: '0.4rem 1rem', fontSize: '0.85rem' }}
+                      onClick={() => setViewerMode('summary')}
+                    >
                       Summary PDF
                     </button>
                     <button
                       className={`btn btn-secondary tab-button ${viewerMode === 'original' ? 'active' : ''}`}
+                      style={{ padding: '0.4rem 1rem', fontSize: '0.85rem' }}
                       onClick={() => setViewerMode('original')}
                     >
-                      Original PDF
-                    </button>
-                    <button className="btn btn-primary" onClick={openOriginalPdf}>
-                      Open Original
+                      Uploaded PDF
                     </button>
                   </div>
                 </div>
@@ -839,10 +861,6 @@ export default function App() {
                 <div className="chat-panel-header">
                   <div>
                     <p className="chat-kicker">Chat with uploaded PDF</p>
-                    <h3>Conversation memory is on</h3>
-                    <p className="chat-memory-note">
-                      You can come back later and continue exactly where you left off.
-                    </p>
                   </div>
                   <span className="chat-status-pill">RAG + memory</span>
                 </div>

@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,7 @@ from google.oauth2 import id_token as google_id_token
 from ai_summarizer import summarize_pdf
 from pdf_generator import generate_summary_pdf
 from pdf_processor import build_pdf_chunks, extract_pdf_text, process_pdf, retrieve_relevant_chunks
+from database import get_connection
 
 app = FastAPI(
     title="Research Paper Summarizer AI API",
@@ -62,8 +64,7 @@ def _safe_paper_dir(user_id: str, summary_id: str) -> Path:
     return _safe_user_dir(user_id) / summary_id
 
 
-def _paper_record_path(user_id: str, summary_id: str) -> Path:
-    return _safe_paper_dir(user_id, summary_id) / "record.json"
+
 
 
 def _paper_file_path(user_id: str, summary_id: str, kind: Literal["original", "summary"]) -> Path:
@@ -108,45 +109,79 @@ def _get_user_from_authorization(authorization: Optional[str]) -> Dict[str, str]
     return _load_google_user_from_token(credential)
 
 
-def _read_record_file(record_path: Path) -> Optional[Dict[str, Any]]:
-    if not record_path.exists():
-        return None
-    try:
-        with record_path.open("r", encoding="utf-8") as handle:
-            return json.load(handle)
-    except Exception:
-        return None
 
 
-def _save_record_file(record: Dict[str, Any]) -> None:
-    record_path = Path(record["record_path"])
-    record_path.parent.mkdir(parents=True, exist_ok=True)
-    with record_path.open("w", encoding="utf-8") as handle:
-        json.dump(record, handle, indent=2, ensure_ascii=False)
 
+def _load_paper_record(user_id: str, summary_id: str):
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
 
-def _load_paper_record(user_id: str, summary_id: str) -> Dict[str, Any]:
-    record = _read_record_file(_paper_record_path(user_id, summary_id))
+    cursor.execute("""
+    SELECT
+        p.*,
+        s.summary_json
+    FROM papers p
+    JOIN summaries s
+        ON p.summary_id = s.summary_id
+    WHERE p.summary_id = %s
+      AND p.google_sub = %s
+    """, (summary_id, user_id))
+
+    record = cursor.fetchone()
+
     if not record:
-        raise HTTPException(status_code=404, detail="Paper not found for this account.")
+        cursor.close()
+        conn.close()
+        raise HTTPException(
+            status_code=404,
+            detail="Paper not found for this account."
+        )
+
+    # Retrieve all chat logs associated with this paper from database
+    cursor.execute("""
+    SELECT role, content
+    FROM chats
+    WHERE summary_id = %s
+    ORDER BY id ASC
+    """, (summary_id,))
+    chats = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    record["summary"] = json.loads(record["summary_json"])
+
+    record["metadata"] = {
+        "title": record["title"],
+        "author": record["author"],
+        "page_count": record["page_count"]
+    }
+    
+    record["conversation_history"] = chats
+    record["conversation_memory"] = _conversation_to_text(chats)
+
     return record
 
 
-def _list_user_records(user_id: str) -> List[Dict[str, Any]]:
-    user_dir = _safe_user_dir(user_id)
-    if not user_dir.exists():
-        return []
+def _list_user_records(user_id: str):
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
 
-    records: List[Dict[str, Any]] = []
-    for paper_dir in user_dir.iterdir():
-        if not paper_dir.is_dir():
-            continue
-        record = _read_record_file(paper_dir / "record.json")
-        if record:
-            records.append(record)
+    cursor.execute("""
+    SELECT
+        p.*,
+        (SELECT COUNT(*) FROM chats c WHERE c.summary_id = p.summary_id) as chat_turns
+    FROM papers p
+    WHERE p.google_sub = %s
+    ORDER BY p.updated_at DESC
+    """, (user_id,))
 
-    records.sort(key=lambda item: item.get("updated_at") or item.get("created_at") or "", reverse=True)
-    return records
+    rows = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    return rows
 
 
 def _conversation_to_text(conversation_history: List[Dict[str, Any]], limit: int = 14) -> str:
@@ -160,24 +195,22 @@ def _conversation_to_text(conversation_history: List[Dict[str, Any]], limit: int
     )
 
 
-def _store_paper_record(record: Dict[str, Any]) -> None:
-    record["updated_at"] = _utc_now()
-    _save_record_file(record)
+
 
 
 def _serialize_paper_list_item(record: Dict[str, Any]) -> Dict[str, Any]:
     summary = record.get("summary", {})
     metadata = record.get("metadata", {})
-    conversation_history = record.get("conversation_history", [])
+    chat_turns = record.get("chat_turns") or 0
     return {
         "summary_id": record["summary_id"],
-        "title": summary.get("title") or metadata.get("title") or "Untitled Paper",
+        "title": summary.get("title") or metadata.get("title") or record.get("title") or "Untitled Paper",
         "created_at": record.get("created_at"),
         "updated_at": record.get("updated_at"),
-        "author": metadata.get("author", "Unknown"),
-        "page_count": metadata.get("page_count", 0),
+        "author": metadata.get("author", "Unknown") or record.get("author") or "Unknown",
+        "page_count": metadata.get("page_count", 0) or record.get("page_count") or 0,
         "original_filename": record.get("original_filename", ""),
-        "chat_turns": len(conversation_history),
+        "chat_turns": chat_turns,
         "summary_pdf_url": _paper_pdf_url(record["summary_id"], "summary"),
         "original_pdf_url": _paper_pdf_url(record["summary_id"], "original"),
     }
@@ -199,6 +232,29 @@ def _serialize_paper_detail(record: Dict[str, Any]) -> Dict[str, Any]:
 @app.post("/api/auth/google")
 async def auth_google(payload: GoogleAuthRequest):
     user = _load_google_user_from_token(payload.credential)
+    # create_user(user)
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    INSERT IGNORE INTO users
+    (
+        google_sub,
+        email,
+        name,
+        picture
+    )
+    VALUES (%s,%s,%s,%s)
+    """,
+    (
+        user["sub"],
+        user["email"],
+        user["name"],
+        user["picture"]
+    ))
+
+    conn.commit()
+    conn.close()
     papers = [_serialize_paper_list_item(record) for record in _list_user_records(user["sub"])]
     return {"user": user, "papers": papers}
 
@@ -242,6 +298,39 @@ async def get_paper_pdf(
     return FileResponse(path=str(pdf_path), media_type="application/pdf", filename=filename)
 
 
+@app.delete("/api/papers/{summary_id}")
+async def delete_paper(summary_id: str, authorization: Optional[str] = Header(default=None)):
+    """Delete a paper, its summary, all chat history, and the associated PDF files."""
+    user = _get_user_from_authorization(authorization)
+
+    # Verify the paper belongs to this user before deleting anything
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute(
+        "SELECT summary_id FROM papers WHERE summary_id = %s AND google_sub = %s",
+        (summary_id, user["sub"]),
+    )
+    if not cursor.fetchone():
+        cursor.close()
+        conn.close()
+        raise HTTPException(status_code=404, detail="Paper not found for this account.")
+
+    # Delete in FK-safe order: chats → summaries → papers
+    cursor.execute("DELETE FROM chats WHERE summary_id = %s", (summary_id,))
+    cursor.execute("DELETE FROM summaries WHERE summary_id = %s", (summary_id,))
+    cursor.execute("DELETE FROM papers WHERE summary_id = %s AND google_sub = %s", (summary_id, user["sub"]))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    # Remove on-disk files (original PDF, summary PDF, etc.)
+    paper_dir = _safe_paper_dir(user["sub"], summary_id)
+    if paper_dir.exists():
+        shutil.rmtree(paper_dir, ignore_errors=True)
+
+    return {"success": True, "deleted": summary_id}
+
+
 @app.post("/api/summarize")
 async def summarize_endpoint(
     file: UploadFile = File(...),
@@ -258,7 +347,6 @@ async def summarize_endpoint(
 
     original_pdf_path = _paper_file_path(user["sub"], summary_id, "original")
     summary_pdf_path = _paper_file_path(user["sub"], summary_id, "summary")
-    record_path = _paper_record_path(user["sub"], summary_id)
 
     try:
         with original_pdf_path.open("wb") as buffer:
@@ -283,7 +371,7 @@ async def summarize_endpoint(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save uploaded file: {exc}") from exc
 
-    pdf_info = process_pdf(str(original_pdf_path))
+    pdf_info = process_pdf(str(original_pdf_path), original_filename=file.filename)
     if not pdf_info["is_valid"]:
         raise HTTPException(status_code=400, detail=pdf_info["error"])
 
@@ -294,8 +382,15 @@ async def summarize_endpoint(
     if "error" in ai_summary:
         raise HTTPException(status_code=500, detail=ai_summary["error"])
 
-    if "title" not in ai_summary or not ai_summary["title"]:
-        ai_summary["title"] = pdf_info["title"]
+    # Format the title with the "Summary - " prefix
+    raw_title = ai_summary.get("title") or pdf_info["title"]
+    if raw_title and not raw_title.startswith("Summary - "):
+        formatted_title = f"Summary - {raw_title}"
+    else:
+        formatted_title = raw_title or "Untitled Paper"
+
+    ai_summary["title"] = formatted_title
+    pdf_info["title"] = formatted_title
 
     try:
         generate_summary_pdf(ai_summary, file.filename, str(summary_pdf_path))
@@ -312,7 +407,6 @@ async def summarize_endpoint(
         "original_filename": file.filename,
         "original_pdf_path": str(original_pdf_path),
         "summary_pdf_path": str(summary_pdf_path),
-        "record_path": str(record_path),
         "metadata": {
             "title": pdf_info["title"],
             "author": pdf_info["author"],
@@ -324,7 +418,55 @@ async def summarize_endpoint(
         "conversation_history": [],
         "conversation_memory": "",
     }
-    _store_paper_record(paper_record)
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Save paper metadata
+    cursor.execute("""
+    INSERT INTO papers
+    (
+        summary_id,
+        google_sub,
+        title,
+        author,
+        page_count,
+        original_filename,
+        original_pdf_path,
+        summary_pdf_path,
+        created_at,
+        updated_at
+    )
+    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+    """,
+    (
+        summary_id,
+        user["sub"],
+        pdf_info["title"],
+        pdf_info["author"],
+        pdf_info["page_count"],
+        file.filename,
+        str(original_pdf_path),
+        str(summary_pdf_path),
+        _utc_now(),
+        _utc_now()
+    ))
+
+    # Save AI summary JSON
+    cursor.execute("""
+    INSERT INTO summaries
+    (
+        summary_id,
+        summary_json
+    )
+    VALUES (%s, %s)
+    """,
+    (
+        summary_id,
+        json.dumps(ai_summary)
+    ))
+
+    conn.commit()
+    conn.close()
 
     return {
         "paper": _serialize_paper_detail(paper_record),
@@ -348,7 +490,20 @@ async def chat_endpoint(
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(model_name="gemini-2.5-flash")
 
-    conversation_history = record.get("conversation_history", [])
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+    SELECT role, content
+    FROM chats
+    WHERE summary_id = %s
+    ORDER BY id ASC
+    """, (payload.summary_id,))
+
+    conversation_history = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
     if payload.history and not conversation_history:
         conversation_history = [
             {"role": item.role, "content": item.content}
@@ -356,8 +511,31 @@ async def chat_endpoint(
         ]
 
     conversation_history.append({"role": "user", "content": payload.message})
+    conn = get_connection()
+    cursor = conn.cursor()
 
-    relevant_chunks = retrieve_relevant_chunks(payload.message, record.get("document_chunks", []), top_k=4)
+    cursor.execute("""
+    INSERT INTO chats
+    (
+        summary_id,
+        role,
+        content
+    )
+    VALUES (%s,%s,%s)
+    """,
+    (
+        payload.summary_id,
+        "user",
+        payload.message
+    ))
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    pdf_path = record.get("original_pdf_path")
+    chunks = build_pdf_chunks(pdf_path) if pdf_path else []
+    relevant_chunks = retrieve_relevant_chunks(payload.message, chunks, top_k=4)
     retrieved_context_lines = [
         f"[Chunk {chunk['chunk_id']} | Page {chunk['page']} | Score {chunk['score']:.3f}] {chunk['text']}"
         for chunk in relevant_chunks
@@ -404,6 +582,27 @@ User question:
             },
         )
         assistant_reply = response.text.strip()
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+        INSERT INTO chats
+        (
+            summary_id,
+            role,
+            content
+        )
+        VALUES (%s,%s,%s)
+        """,
+        (
+            payload.summary_id,
+            "assistant",
+            assistant_reply
+        ))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
 
         sources = [
             {
@@ -424,7 +623,6 @@ User question:
         )
         record["conversation_history"] = conversation_history
         record["conversation_memory"] = _conversation_to_text(conversation_history, limit=16)
-        _store_paper_record(record)
 
         return {
             "reply": assistant_reply,

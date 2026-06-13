@@ -4,12 +4,13 @@ import re
 from collections import Counter
 import fitz  # PyMuPDF
 
-def process_pdf(file_path: str) -> dict:
+def process_pdf(file_path: str, original_filename: str = None) -> dict:
     """
     Validates a local PDF file, checks page count, and extracts document metadata.
     
     Inputs:
         file_path (str): Absolute path to the PDF file.
+        original_filename (str, optional): The original name of the uploaded file.
         
     Outputs:
         dict: A dictionary containing:
@@ -42,10 +43,11 @@ def process_pdf(file_path: str) -> dict:
         # Read metadata
         meta = doc.metadata or {}
         
-        # Get title from metadata or fallback to filename
+        # Get title from metadata or fallback to original_filename / basename
         title = meta.get("title", "").strip()
         if not title:
-            title = os.path.splitext(os.path.basename(file_path))[0]
+            fallback_source = original_filename if original_filename else os.path.basename(file_path)
+            title = os.path.splitext(fallback_source)[0]
             # Clean up underscores and dashes in title for display
             title = title.replace("_", " ").replace("-", " ").title()
             

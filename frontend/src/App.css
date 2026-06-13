@@ -935,15 +935,51 @@
   padding-right: 0.2rem;
 }
 
+.paper-list-item-wrapper {
+  position: relative;
+}
+
+.paper-list-item-wrapper:hover .paper-delete-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.paper-delete-btn {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.55rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease, background 0.18s ease, color 0.18s ease;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 0.3rem 0.38rem;
+  cursor: pointer;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.paper-delete-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #f87171;
+}
+
 .paper-list-item {
   text-align: left;
   border: 1px solid var(--border-light);
   background: rgba(255, 255, 255, 0.02);
   border-radius: 16px;
   padding: 1rem;
+  padding-right: 2.4rem;
   color: var(--text-primary);
   cursor: pointer;
   transition: var(--transition-smooth);
+  width: 100%;
 }
 
 .paper-list-item:hover:not(:disabled) {
