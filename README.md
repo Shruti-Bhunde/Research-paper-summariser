@@ -407,6 +407,7 @@ Through this project I learned:
 
 - Multi paper comparison
 - Search option for chats
+- Deployment 
 ## Author
 
 ### Shruti Bhunde
