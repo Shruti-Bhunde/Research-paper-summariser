@@ -43,6 +43,8 @@ Research papers are often lengthy and difficult for students to understand quick
 ### Authentication
 - Google OAuth 2.0
 ## Architecture
+<img width="1408" height="768" alt="Gemini_Generated_Image_awor31awor31awor" src="https://github.com/user-attachments/assets/864d5f92-63dd-4118-9e91-02c74722334f" />
+
 ## API Endpoints
 
 ### Authentication
@@ -259,6 +261,11 @@ Returns:
 
 
 ## Screenshots
+<img width="1919" height="1022" alt="image" src="https://github.com/user-attachments/assets/f8a7304b-8a01-4096-a26f-7ec48daafb08" />
+<img width="1919" height="1017" alt="image" src="https://github.com/user-attachments/assets/4c9f579a-5438-4d06-9f49-cbe8ac28b1a0" />
+<img width="1906" height="1011" alt="image" src="https://github.com/user-attachments/assets/31bd0996-356c-476d-9600-d97bebdc7620" />
+
+
 
 
 ## Run Locally
