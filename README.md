@@ -266,10 +266,6 @@ Returns:
 <img width="1906" height="1011" alt="image" src="https://github.com/user-attachments/assets/31bd0996-356c-476d-9600-d97bebdc7620" />
 
 
-
-
-## Run Locally
-
 ## Run Locally
 
 ### 1. Clone the Repository
