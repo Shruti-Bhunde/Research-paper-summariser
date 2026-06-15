@@ -19,7 +19,7 @@ from pdf_generator import generate_summary_pdf
 from pdf_processor import build_pdf_chunks, extract_pdf_text, process_pdf, retrieve_relevant_chunks
 from database import get_connection
 
-app = FastAPI
+app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
